@@ -257,15 +257,25 @@ source venv/bin/activate
 pytest test_kb_counter.py -v
 ```
 
-78 tests covering: smoothing, normalisation, state-machine transitions, lockout guards, calibration, switch-mode detection, and multi-switch N×M rep patterns. No camera or MediaPipe required to run tests.
+52 tests covering: smoothing, normalisation, state-machine transitions, lockout guards, calibration, switch-mode detection, and multi-switch N×M rep patterns. No camera or MediaPipe required to run tests.
 
 ---
 
 ## Project Structure
 
 ```
-kb_counter.py        # All logic: state machine, calibration, HUD, main loop
-test_kb_counter.py   # 78 unit tests (pure Python, no CV/MediaPipe)
+kb_counter.py        # CLI entry point and main video loop
+constants.py         # Shared state-machine constants and thresholds
+geometry.py          # Pure geometry helpers (normalisation, angle, smoothing)
+tracker.py           # SideTracker: per-wrist state machine
+calibration.py       # Calibrator class, threshold derivation, JSON persistence
+hud.py               # OpenCV HUD drawing functions (single / double / switch)
+tests/
+  test_tracker.py    # State machine and SideTracker tests
+  test_calibration.py
+  test_geometry.py
+  test_switch.py
+  conftest.py
 calibration.json     # Auto-generated after --calibrate (gitignored)
 ```
 
