@@ -5,8 +5,9 @@ No CV or MediaPipe required — all heavy deps are avoided.
 Run with:  pytest test_snatch_counter.py -v
 """
 
-import pytest
 from collections import deque
+
+import pytest
 
 from snatch_counter import (
     BOTTOM, RISING, TOP, FALLING,
@@ -85,17 +86,22 @@ LOCKOUT_DRAIN = [BELOW_HIP_NORM_Y] * MIN_REP_LOCKOUT
 # ── smooth() ─────────────────────────────────────────────────────────────────
 
 class TestSmooth:
+    """Tests for the smooth() rolling-average helper."""
+
     def test_single_value(self):
+        """A single value in an empty window returns that value."""
         smoothing_window = deque(maxlen=SMOOTH_WINDOW)
         assert smooth(smoothing_window, 0.6) == pytest.approx(0.6)
 
     def test_average_of_two(self):
+        """Average of two values is their mean."""
         smoothing_window = deque(maxlen=SMOOTH_WINDOW)
         smooth(smoothing_window, 0.2)
         result = smooth(smoothing_window, 0.8)
         assert result == pytest.approx(0.5)
 
     def test_window_evicts_oldest(self):
+        """Once full, oldest entry is evicted before averaging."""
         smoothing_window = deque(maxlen=3)
         smooth(smoothing_window, 1.0)
         smooth(smoothing_window, 1.0)
@@ -105,6 +111,7 @@ class TestSmooth:
         assert result == pytest.approx((1.0 + 1.0 + 0.0) / 3)
 
     def test_converges_to_constant(self):
+        """After filling window with a constant, result equals that constant."""
         smoothing_window = deque(maxlen=SMOOTH_WINDOW)
         for _ in range(SMOOTH_WINDOW):
             result = smooth(smoothing_window, 0.7)
@@ -114,36 +121,45 @@ class TestSmooth:
 # ── normalise_wrist() ─────────────────────────────────────────────────────────
 
 class TestNormaliseWrist:
+    """Tests for the normalise_wrist() coordinate mapper."""
+
     # shoulder_y=100px, hip_y=200px → torso_height_px=100
     SHOULDER_Y_PX = 100.0
     HIP_Y_PX      = 200.0
 
     def test_at_shoulder_level(self):
+        """Wrist at shoulder yields norm_y == 0.0."""
         assert normalise_wrist(
             self.SHOULDER_Y_PX, self.SHOULDER_Y_PX, self.HIP_Y_PX
         ) == pytest.approx(0.0)
 
     def test_at_hip_level(self):
+        """Wrist at hip yields norm_y == 1.0."""
         assert normalise_wrist(
             self.HIP_Y_PX, self.SHOULDER_Y_PX, self.HIP_Y_PX
         ) == pytest.approx(1.0)
 
     def test_overhead(self):
+        """Wrist above shoulder yields negative norm_y."""
         # wrist above shoulder → negative result
         assert normalise_wrist(50.0, self.SHOULDER_Y_PX, self.HIP_Y_PX) == pytest.approx(-0.5)
 
     def test_deep_swing(self):
+        """Wrist below hip yields norm_y > 1.0."""
         # wrist well below hip → >1
         assert normalise_wrist(250.0, self.SHOULDER_Y_PX, self.HIP_Y_PX) == pytest.approx(1.5)
 
     def test_midpoint(self):
+        """Wrist at torso midpoint yields norm_y == 0.5."""
         assert normalise_wrist(150.0, self.SHOULDER_Y_PX, self.HIP_Y_PX) == pytest.approx(0.5)
 
     def test_degenerate_span_returns_half(self):
+        """Zero-height torso guard returns 0.5."""
         # shoulder == hip → guard triggers → 0.5
         assert normalise_wrist(100.0, 100.0, 100.0) == pytest.approx(0.5)
 
     def test_near_zero_span_returns_half(self):
+        """Near-zero torso height also triggers the degenerate guard."""
         assert normalise_wrist(100.0, 100.0, 100.0 + 1e-7) == pytest.approx(0.5)
 
 
@@ -153,18 +169,21 @@ class TestTransitionEdges:
     """Boundary values exactly on the thresholds."""
 
     def test_bottom_at_threshold_no_transition(self):
+        """norm_y exactly equal to RISE_THRESHOLD does not trigger RISING."""
         # norm_y == RISE_THRESHOLD → NOT < threshold, stays BOTTOM
         tracker = SideTracker()
         transition(tracker, RISE_THRESHOLD)
         assert tracker.state == BOTTOM
 
     def test_bottom_just_below_threshold_rises(self):
+        """norm_y just below RISE_THRESHOLD triggers RISING."""
         tracker = SideTracker()
         tracker.needs_init = False
         transition(tracker, RISE_THRESHOLD - 0.001)
         assert tracker.state == RISING
 
     def test_falling_at_threshold_no_rep(self):
+        """norm_y exactly equal to DROP_THRESHOLD does not count a rep."""
         tracker = SideTracker()
         tracker.state = FALLING
         transition(tracker, DROP_THRESHOLD)
@@ -172,6 +191,7 @@ class TestTransitionEdges:
         assert tracker.rep_count == 0
 
     def test_falling_just_above_threshold_counts(self):
+        """norm_y just above DROP_THRESHOLD completes a rep."""
         tracker = SideTracker()
         tracker.state = FALLING
         transition(tracker, DROP_THRESHOLD + 0.001)
@@ -183,24 +203,28 @@ class TestTransitionStateMachine:
     """Happy-path state progression."""
 
     def test_bottom_stays_when_wrist_is_low(self):
+        """Wrist below hip in BOTTOM stays BOTTOM with no rep."""
         tracker = SideTracker()
         transition(tracker, BELOW_HIP_NORM_Y)
         assert tracker.state == BOTTOM
         assert tracker.rep_count == 0
 
     def test_bottom_to_rising_when_wrist_overhead(self):
+        """Wrist overhead from BOTTOM transitions to RISING."""
         tracker = SideTracker()
         tracker.needs_init = False
         transition(tracker, OVERHEAD_NORM_Y)
         assert tracker.state == RISING
 
     def test_rising_to_top_when_wrist_stays_overhead(self):
+        """Wrist overhead from RISING transitions to TOP."""
         tracker = SideTracker()
         tracker.state = RISING
         transition(tracker, OVERHEAD_NORM_Y)
         assert tracker.state == TOP
 
     def test_rising_resets_to_bottom_when_wrist_drops_past_hip(self):
+        """Wrist dropping past hip while RISING resets to BOTTOM."""
         # Wrist drops below drop_threshold while RISING (no KB at top) → BOTTOM
         tracker = SideTracker()
         tracker.state = RISING
@@ -208,6 +232,7 @@ class TestTransitionStateMachine:
         assert tracker.state == BOTTOM
 
     def test_top_to_falling_after_min_overhead_frames(self):
+        """After enough overhead frames TOP transitions to FALLING on descent."""
         # Must stay overhead for MIN_TOP_FRAMES frames, then descend → FALLING
         tracker = SideTracker()
         tracker.state = TOP
@@ -217,6 +242,7 @@ class TestTransitionStateMachine:
         assert tracker.state == FALLING
 
     def test_top_aborts_to_bottom_on_brief_overhead(self):
+        """Insufficient overhead frames resets to BOTTOM without counting."""
         # Wrist descends before MIN_TOP_FRAMES → swing-through, resets to BOTTOM
         tracker = SideTracker()
         tracker.state = TOP
@@ -226,12 +252,14 @@ class TestTransitionStateMachine:
         assert tracker.rep_count == 0
 
     def test_top_stays_when_wrist_remains_overhead(self):
+        """Wrist remaining overhead in TOP stays in TOP."""
         tracker = SideTracker()
         tracker.state = TOP
         transition(tracker, OVERHEAD_NORM_Y)
         assert tracker.state == TOP
 
     def test_falling_stays_when_wrist_not_yet_low(self):
+        """Wrist between thresholds while FALLING stays in FALLING."""
         tracker = SideTracker()
         tracker.state = FALLING
         transition(tracker, MID_NORM_Y)
@@ -239,6 +267,7 @@ class TestTransitionStateMachine:
         assert tracker.rep_count == 0
 
     def test_falling_to_bottom_increments_rep(self):
+        """Wrist reaching below hip from FALLING completes the rep."""
         tracker = SideTracker()
         tracker.state = FALLING
         transition(tracker, BELOW_HIP_NORM_Y)
@@ -252,12 +281,14 @@ class TestLockout:
     """Post-rep lockout prevents backswing from starting a new cycle."""
 
     def test_lockout_set_after_rep(self):
+        """Completing a rep sets lockout to MIN_REP_LOCKOUT."""
         tracker = SideTracker()
         tracker.state = FALLING
         transition(tracker, BELOW_HIP_NORM_Y)
         assert tracker.lockout == MIN_REP_LOCKOUT
 
     def test_lockout_blocks_rising_from_bottom(self):
+        """Non-zero lockout prevents BOTTOM→RISING transition."""
         tracker = SideTracker()
         tracker.needs_init = False
         tracker.lockout = 5
@@ -265,12 +296,14 @@ class TestLockout:
         assert tracker.state == BOTTOM
 
     def test_lockout_decrements_each_frame(self):
+        """Lockout counter decrements by one each frame."""
         tracker = SideTracker()
         tracker.lockout = 3
         transition(tracker, BELOW_HIP_NORM_Y)
         assert tracker.lockout == 2
 
     def test_lockout_allows_rising_when_zero(self):
+        """Lockout reaching zero in the same frame allows RISING."""
         # lockout=1: decrements to 0 in the same frame, then BOTTOM→RISING fires
         tracker = SideTracker()
         tracker.needs_init = False
@@ -282,17 +315,22 @@ class TestLockout:
 # ── Full rep cycles ───────────────────────────────────────────────────────────
 
 class TestFullRepCycle:
+    """End-to-end state-machine rep-counting using drive_state_machine."""
+
     def test_one_complete_rep(self):
+        """ONE_REP sequence produces exactly one rep and ends at BOTTOM."""
         state, rep_count = drive_state_machine(ONE_REP)
         assert rep_count == 1
         assert state == BOTTOM
 
     def test_three_reps(self):
+        """Three ONE_REP sequences separated by lockout drains count three reps."""
         seq = (ONE_REP + LOCKOUT_DRAIN) * 2 + ONE_REP
         _, rep_count = drive_state_machine(seq)
         assert rep_count == 3
 
     def test_no_rep_without_overhead(self):
+        """Wrist never going overhead results in zero reps."""
         # Wrist never goes overhead → never leaves BOTTOM → no reps
         norm_y_sequence = [MID_NORM_Y, MID_NORM_Y, BELOW_HIP_NORM_Y,
                            BELOW_HIP_NORM_Y, MID_NORM_Y]
@@ -300,6 +338,7 @@ class TestFullRepCycle:
         assert rep_count == 0
 
     def test_no_rep_without_drop(self):
+        """Wrist staying overhead without dropping to hip results in zero reps."""
         # Rises and stays overhead long enough, but never drops → stays FALLING
         norm_y_sequence = (
             [BELOW_HIP_NORM_Y]
@@ -311,6 +350,7 @@ class TestFullRepCycle:
         assert state == FALLING
 
     def test_rep_count_accumulates(self):
+        """Rep counts accumulate correctly across multiple cycles."""
         one_rep_with_drain = ONE_REP + LOCKOUT_DRAIN
         _, count_after_one  = drive_state_machine(ONE_REP)
         _, count_after_five = drive_state_machine(one_rep_with_drain * 4 + ONE_REP)
@@ -318,6 +358,7 @@ class TestFullRepCycle:
         assert count_after_five == 5
 
     def test_swing_through_does_not_count(self):
+        """Swing-through (insufficient overhead frames) does not count as a rep."""
         # Wrist crosses overhead but not long enough (MIN_TOP_FRAMES - 1) → no rep
         swing_through = (
             [BELOW_HIP_NORM_Y]
@@ -332,7 +373,10 @@ class TestFullRepCycle:
 # ── SideTracker ───────────────────────────────────────────────────────────────
 
 class TestSideTracker:
+    """Tests for SideTracker default construction and field values."""
+
     def test_initial_state(self):
+        """Freshly constructed SideTracker has expected default field values."""
         tracker = SideTracker()
         assert tracker.state == BOTTOM
         assert tracker.rep_count == 0
@@ -340,9 +384,10 @@ class TestSideTracker:
         assert tracker.norm_y == 0.5
         assert tracker.top_frames == 0
         assert tracker.lockout == 0
-        assert tracker.needs_init == True
+        assert tracker.needs_init is True
 
     def test_smooth_buf_capacity(self):
+        """smooth_buf maxlen matches the SMOOTH_WINDOW constant."""
         tracker = SideTracker()
         assert tracker.smooth_buf.maxlen == SMOOTH_WINDOW
 
@@ -364,12 +409,14 @@ class TestUpdateTracker:
     WRIST_IDX = 0; SHOULDER_IDX = 1; HIP_IDX = 2; ELBOW_IDX = 3
 
     def _landmarks_with_wrist_at(self, wrist_y_norm):
+        """Build a landmark list with the wrist at the given normalised y."""
         return make_landmark_list(
             wrist_y_norm, self.SHOULDER_Y_NORM, self.HIP_Y_NORM,
             self.WRIST_IDX, self.SHOULDER_IDX, self.HIP_IDX, self.ELBOW_IDX,
         )
 
     def _call(self, tracker, wrist_y_norm, **kwargs):
+        """Call update_tracker with a synthetic landmark list."""
         update_tracker(
             tracker, self._landmarks_with_wrist_at(wrist_y_norm),
             self.WRIST_IDX, self.SHOULDER_IDX, self.HIP_IDX, self.ELBOW_IDX,
@@ -377,6 +424,7 @@ class TestUpdateTracker:
         )
 
     def test_wrist_overhead_transitions_to_rising(self):
+        """Overhead wrist position transitions tracker from BOTTOM to RISING."""
         # wrist at y=0.05 (pixel 5) → norm_y = (5-25)/50 = -0.4 → overhead
         tracker = SideTracker()
         tracker.needs_init = False
@@ -384,12 +432,14 @@ class TestUpdateTracker:
         assert tracker.state == RISING
 
     def test_wrist_at_hip_level_stays_bottom(self):
+        """Wrist at hip level keeps tracker in BOTTOM."""
         # wrist at hip level → norm_y ≈ 1.0 → stays BOTTOM
         tracker = SideTracker()
         self._call(tracker, self.HIP_Y_NORM)
         assert tracker.state == BOTTOM
 
     def test_norm_y_is_zero_when_wrist_at_shoulder(self):
+        """Wrist at shoulder level produces norm_y == 0.0."""
         tracker = SideTracker()
         self._call(tracker, self.SHOULDER_Y_NORM)
         assert tracker.norm_y == pytest.approx(0.0, abs=1e-6)
@@ -449,7 +499,7 @@ class TestNeedsInit:
         # norm_y between thresholds is not a confirmed bottom
         tracker = SideTracker()
         transition(tracker, MID_NORM_Y)
-        assert tracker.needs_init == True
+        assert tracker.needs_init is True
         assert tracker.state == BOTTOM
 
 
@@ -759,7 +809,7 @@ class TestSwitchMode:
             (_OVERHEAD, _HIP),        # right: BOTTOM → RISING
             (_OVERHEAD, _OVERHEAD),   # right: RISING, left overhead — no switch
         ]
-        r, l, side = simulate_switch(frames)
+        _r, _l, side = simulate_switch(frames)
         assert side == 'right', "Switch fired during RISING"
 
     def test_switch_blocked_during_top(self):
@@ -769,13 +819,13 @@ class TestSwitchMode:
             (_OVERHEAD, _HIP),        # TOP
             (_OVERHEAD, _OVERHEAD),   # TOP + left overhead — no switch
         ]
-        r, l, side = simulate_switch(frames)
+        _r, _l, side = simulate_switch(frames)
         assert side == 'right', "Switch fired during TOP"
 
     def test_switch_blocked_when_active_wrist_mid_air(self):
         """Switch must NOT fire when active wrist is between thresholds."""
         frames = list(_PAUSE) + [(_MID, _OVERHEAD)] * 5
-        r, l, side = simulate_switch(frames)
+        _r, _l, side = simulate_switch(frames)
         assert side == 'right', "Switch fired while active wrist was not at hip"
 
     def test_switch_lockout_prevents_ping_pong(self):
@@ -783,7 +833,7 @@ class TestSwitchMode:
         switch_trigger = [(_HIP, _OVERHEAD)]
         old_wrist_lingers = [(_OVERHEAD, _OVERHEAD)] * 25
         frames = list(_PAUSE) + _right_rep() + switch_trigger + old_wrist_lingers
-        r, l, side = simulate_switch(frames)
+        _r, _l, side = simulate_switch(frames)
         assert side == 'left', "Ping-pong switch: reverted to right during lockout"
 
     def test_rep_counted_after_switch_not_before(self):
@@ -803,14 +853,14 @@ class TestSwitchMode:
         Each switch adds one rep on the incoming side (first descent from overhead).
         2R + switch(→L1) + 1L + switch(→R1) = 3R total, 2L total.
         """
-        sw_RL = [(_HIP, _OVERHEAD)]   # right at hip, left overhead → switch to left
-        sw_LR = [(_OVERHEAD, _HIP)]   # right overhead, left at hip → switch to right
+        sw_r_to_l = [(_HIP, _OVERHEAD)]   # right at hip, left overhead → switch to left
+        sw_l_to_r = [(_OVERHEAD, _HIP)]   # right overhead, left at hip → switch to right
         frames = (
             list(_PAUSE) +
-            _right_rep() + list(_PAUSE) + _right_rep() +   # 2 right reps
-            sw_RL + _left_init() + list(_PAUSE) +           # switch; first descent = l rep 1
-            _left_rep() + list(_PAUSE) +                    # explicit jerk = l rep 2; drain lockout
-            sw_LR + [(_HIP, _HIP)] * 3                     # switch back; first descent = r rep 3
+            _right_rep() + list(_PAUSE) + _right_rep() +        # 2 right reps
+            sw_r_to_l + _left_init() + list(_PAUSE) +           # switch; first descent = l rep 1
+            _left_rep() + list(_PAUSE) +                        # explicit jerk = l rep 2; drain lockout
+            sw_l_to_r + [(_HIP, _HIP)] * 3                     # switch back; first descent = r rep 3
         )
         r, l, _ = simulate_switch(frames)
         assert r == 3 and l == 2

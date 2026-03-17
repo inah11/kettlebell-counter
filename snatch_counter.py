@@ -82,6 +82,7 @@ class Calibrator:
         self.done      = False
 
     def update(self, norm_y: float) -> None:
+        """Append one norm_y sample; mark done when n_frames reached."""
         if self.done:
             return
         self._samples.append(norm_y)
@@ -89,18 +90,32 @@ class Calibrator:
             self.done = True
 
     @property
+    def n_frames(self) -> int:
+        """Total frames to collect before calibration is complete."""
+        return self._n_frames
+
+    @property
+    def samples(self):
+        """Read-only view of collected norm_y samples."""
+        return self._samples
+
+    @property
     def progress(self) -> float:
+        """Fraction of calibration frames collected (0.0–1.0)."""
         return len(self._samples) / self._n_frames
 
     @property
     def frames_collected(self) -> int:
+        """Number of norm_y samples collected so far."""
         return len(self._samples)
 
     def derive_thresholds(self):
+        """Derive rise/drop thresholds from collected samples."""
         return derive_thresholds_from_samples(self._samples)
 
 
 def parse_args():
+    """Parse and return command-line arguments."""
     parser = argparse.ArgumentParser(description="Kettlebell snatch rep counter")
     parser.add_argument("video", help="Path to input video file")
     parser.add_argument("--mode", choices=["single", "double", "switch"], default="single",
@@ -141,6 +156,7 @@ def angle_at_joint(ax, ay, bx, by, cx, cy) -> float:
 
 
 def smooth(window: deque, value: float) -> float:
+    """Append value to the rolling window and return the current average."""
     window.append(value)
     return sum(window) / len(window)
 
@@ -302,24 +318,25 @@ def update_tracker(tracker: SideTracker, landmark_list,
 
 def save_calibration(rise: float, drop: float,
                      path: pathlib.Path = CALIB_FILE) -> None:
+    """Persist rise/drop thresholds to a JSON file at path."""
     data = {"rise_threshold": rise, "drop_threshold": drop}
-    path.write_text(json.dumps(data, indent=2))
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def load_calibration(path: pathlib.Path = CALIB_FILE):
     """Return (rise, drop) tuple, or None on any error (missing/malformed file)."""
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         rise = data["rise_threshold"]
         drop = data["drop_threshold"]
         return (rise, drop)
-    except Exception:
+    except (KeyError, ValueError, OSError, json.JSONDecodeError):
         return None
 
 
 def draw_wrist_dot(frame, landmark_list, wrist_idx, frame_w: int, frame_h: int,
                    color):
-    """landmark_list is result.pose_landmarks.landmark (subscriptable list)."""
+    """Draw a filled circle on frame at the wrist landmark position."""
     wrist   = landmark_list[wrist_idx]
     pixel_x = int(wrist.x * frame_w)
     pixel_y = int(wrist.y * frame_h)
@@ -327,6 +344,7 @@ def draw_wrist_dot(frame, landmark_list, wrist_idx, frame_w: int, frame_h: int,
 
 
 def draw_skeleton(frame, pose_landmarks, mp_pose):
+    """Render the MediaPipe pose skeleton and landmark dots onto frame."""
     mp_draw  = mp.solutions.drawing_utils
     mp_style = mp.solutions.drawing_styles
     mp_draw.draw_landmarks(
@@ -344,11 +362,11 @@ def draw_calibration_hud(frame, calibrator: Calibrator,
     title = "CALIBRATION PASS" if dedicated_mode else "Calibrating..."
     cv2.putText(frame, title, (w // 2 - 180, 60),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 220, 255), 3, cv2.LINE_AA)
-    cv2.putText(frame, f"Frames: {calibrator.frames_collected}/{calibrator._n_frames}",
+    cv2.putText(frame, f"Frames: {calibrator.frames_collected}/{calibrator.n_frames}",
                 (20, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (200, 200, 200), 2, cv2.LINE_AA)
-    if calibrator._samples:
-        obs_min = min(calibrator._samples)
-        obs_max = max(calibrator._samples)
+    if calibrator.samples:
+        obs_min = min(calibrator.samples)
+        obs_max = max(calibrator.samples)
         cv2.putText(frame, f"obs_min={obs_min:.2f}  obs_max={obs_max:.2f}",
                     (20, 145), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 180, 180), 1, cv2.LINE_AA)
     # Progress bar at bottom of frame
@@ -432,8 +450,9 @@ def draw_overlay_double(frame, pose_landmarks, frame_w: int, frame_h: int,
     cv2.putText(frame, f"Total: {combined_rep_count}", (20, 305),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2, cv2.LINE_AA)
     if right_tracker.rise_threshold != RISE_THRESHOLD:
-        cv2.putText(frame,
-                    f"calib rise={right_tracker.rise_threshold:.2f} drop={right_tracker.drop_threshold:.2f}",
+        calib_text = (f"calib rise={right_tracker.rise_threshold:.2f}"
+                      f" drop={right_tracker.drop_threshold:.2f}")
+        cv2.putText(frame, calib_text,
                     (20, 335), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 220, 255), 1, cv2.LINE_AA)
 
 
@@ -490,7 +509,7 @@ def draw_overlay_switch(frame, pose_landmarks, frame_w: int, frame_h: int,
 
 def _save_partial_calibration(calibrator: Calibrator, label: str) -> None:
     """Save thresholds from whatever samples were collected; skip if too few."""
-    samples = calibrator._samples
+    samples = calibrator.samples
     if len(samples) >= 10:
         rise, drop = derive_thresholds_from_samples(samples)
         save_calibration(rise, drop)
@@ -509,7 +528,7 @@ def main():
     _log_file = None
     if args.log:
         import csv as _csv
-        _log_file = open(args.log, "w", newline="")
+        _log_file = open(args.log, "w", newline="", encoding="utf-8")
         _log_writer = _csv.writer(_log_file)
         _log_writer.writerow([
             "frame", "pose_detected",
@@ -556,7 +575,8 @@ def main():
     PoseLandmark = mp_pose.PoseLandmark
 
     right_tracker = SideTracker(min_top_frames=min_top_frames)
-    left_tracker  = SideTracker(min_top_frames=min_top_frames) if (double_mode or switch_mode) else None
+    left_tracker  = (SideTracker(min_top_frames=min_top_frames)
+                     if (double_mode or switch_mode) else None)
 
     # ── Determine calibration mode ─────────────────────────────────────────────
     # Priority: --calibrate > --no-auto-calib / existing file > auto-calibrate
