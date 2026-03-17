@@ -14,7 +14,7 @@ from kb_counter import (
     RISE_THRESHOLD, DROP_THRESHOLD, SMOOTH_WINDOW,
     MIN_TOP_FRAMES, MIN_REP_LOCKOUT,
     CALIB_MIN_RANGE, CALIB_RISE_FRAC, CALIB_DROP_FRAC,
-    smooth, normalise_wrist, transition, SideTracker, update_tracker,
+    smooth, normalise_wrist, SideTracker,
     derive_thresholds_from_samples, Calibrator,
     save_calibration, load_calibration,
 )
@@ -53,7 +53,7 @@ def drive_state_machine(norm_y_sequence):
     """
     tracker = SideTracker()
     for norm_y in norm_y_sequence:
-        transition(tracker, norm_y)
+        tracker.transition(norm_y)
     return tracker.state, tracker.rep_count
 
 
@@ -172,21 +172,21 @@ class TestTransitionEdges:
         """norm_y exactly equal to RISE_THRESHOLD does not trigger RISING."""
         # norm_y == RISE_THRESHOLD → NOT < threshold, stays BOTTOM
         tracker = SideTracker()
-        transition(tracker, RISE_THRESHOLD)
+        tracker.transition(RISE_THRESHOLD)
         assert tracker.state == BOTTOM
 
     def test_bottom_just_below_threshold_rises(self):
         """norm_y just below RISE_THRESHOLD triggers RISING."""
         tracker = SideTracker()
         tracker.needs_init = False
-        transition(tracker, RISE_THRESHOLD - 0.001)
+        tracker.transition(RISE_THRESHOLD - 0.001)
         assert tracker.state == RISING
 
     def test_falling_at_threshold_no_rep(self):
         """norm_y exactly equal to DROP_THRESHOLD does not count a rep."""
         tracker = SideTracker()
         tracker.state = FALLING
-        transition(tracker, DROP_THRESHOLD)
+        tracker.transition(DROP_THRESHOLD)
         assert tracker.state == FALLING
         assert tracker.rep_count == 0
 
@@ -194,7 +194,7 @@ class TestTransitionEdges:
         """norm_y just above DROP_THRESHOLD moves FALLING → BOTTOM (rep already counted at top)."""
         tracker = SideTracker()
         tracker.state = FALLING
-        transition(tracker, DROP_THRESHOLD + 0.001)
+        tracker.transition(DROP_THRESHOLD + 0.001)
         assert tracker.state == BOTTOM
         assert tracker.rep_count == 0  # rep was counted at TOP→FALLING, not here
 
@@ -205,7 +205,7 @@ class TestTransitionStateMachine:
     def test_bottom_stays_when_wrist_is_low(self):
         """Wrist below hip in BOTTOM stays BOTTOM with no rep."""
         tracker = SideTracker()
-        transition(tracker, BELOW_HIP_NORM_Y)
+        tracker.transition(BELOW_HIP_NORM_Y)
         assert tracker.state == BOTTOM
         assert tracker.rep_count == 0
 
@@ -213,14 +213,14 @@ class TestTransitionStateMachine:
         """Wrist overhead from BOTTOM transitions to RISING."""
         tracker = SideTracker()
         tracker.needs_init = False
-        transition(tracker, OVERHEAD_NORM_Y)
+        tracker.transition(OVERHEAD_NORM_Y)
         assert tracker.state == RISING
 
     def test_rising_to_top_when_wrist_stays_overhead(self):
         """Wrist overhead from RISING transitions to TOP."""
         tracker = SideTracker()
         tracker.state = RISING
-        transition(tracker, OVERHEAD_NORM_Y)
+        tracker.transition(OVERHEAD_NORM_Y)
         assert tracker.state == TOP
 
     def test_rising_resets_to_bottom_when_wrist_drops_past_hip(self):
@@ -228,7 +228,7 @@ class TestTransitionStateMachine:
         # Wrist drops below drop_threshold while RISING (no KB at top) → BOTTOM
         tracker = SideTracker()
         tracker.state = RISING
-        transition(tracker, BELOW_HIP_NORM_Y)   # norm_y > DROP_THRESHOLD
+        tracker.transition(BELOW_HIP_NORM_Y)   # norm_y > DROP_THRESHOLD
         assert tracker.state == BOTTOM
 
     def test_top_to_falling_after_min_overhead_frames(self):
@@ -237,8 +237,8 @@ class TestTransitionStateMachine:
         tracker = SideTracker()
         tracker.state = TOP
         for _ in range(MIN_TOP_FRAMES):
-            transition(tracker, OVERHEAD_NORM_Y)
-        transition(tracker, MID_NORM_Y)
+            tracker.transition(OVERHEAD_NORM_Y)
+        tracker.transition(MID_NORM_Y)
         assert tracker.state == FALLING
 
     def test_top_aborts_to_bottom_on_brief_overhead(self):
@@ -247,7 +247,7 @@ class TestTransitionStateMachine:
         tracker = SideTracker()
         tracker.state = TOP
         tracker.top_frames = MIN_TOP_FRAMES - 1  # one short of the requirement
-        transition(tracker, MID_NORM_Y)
+        tracker.transition(MID_NORM_Y)
         assert tracker.state == BOTTOM
         assert tracker.rep_count == 0
 
@@ -255,31 +255,41 @@ class TestTransitionStateMachine:
         """Wrist remaining overhead in TOP stays in TOP."""
         tracker = SideTracker()
         tracker.state = TOP
-        transition(tracker, OVERHEAD_NORM_Y)
+        tracker.transition(OVERHEAD_NORM_Y)
         assert tracker.state == TOP
 
     def test_falling_stays_when_wrist_not_yet_low(self):
         """Wrist between thresholds while FALLING stays in FALLING."""
         tracker = SideTracker()
         tracker.state = FALLING
-        transition(tracker, MID_NORM_Y)
+        tracker.transition(MID_NORM_Y)
         assert tracker.state == FALLING
         assert tracker.rep_count == 0
 
-    def test_top_to_falling_counts_rep(self):
-        """Rep is counted at TOP→FALLING when overhead hold is confirmed."""
+    def test_count_fires_when_overhead_fixation_reached(self):
+        """Rep is counted the moment top_frames hits the threshold, while still overhead."""
+        tracker = SideTracker()
+        tracker.state = TOP
+        tracker.top_frames = MIN_TOP_FRAMES - 1   # one short of threshold
+        tracker.transition(OVERHEAD_NORM_Y)        # last overhead frame → threshold hit
+        assert tracker.rep_count == 1
+        assert tracker.state == TOP   # still overhead, not yet descending
+
+    def test_top_transitions_to_falling_after_confirmed_fixation(self):
+        """After fixation is confirmed, descending from TOP → FALLING (no extra count)."""
         tracker = SideTracker()
         tracker.state = TOP
         tracker.top_frames = MIN_TOP_FRAMES
-        transition(tracker, MID_NORM_Y)   # wrist starts descending
+        tracker._counted_this_cycle = True   # fixation already confirmed
+        tracker.transition(MID_NORM_Y)        # wrist starts descending
         assert tracker.state == FALLING
-        assert tracker.rep_count == 1
+        assert tracker.rep_count == 0   # count happened earlier, not here
 
     def test_falling_to_bottom_resets_state_without_counting(self):
         """FALLING → BOTTOM changes state only; rep was already counted at the top."""
         tracker = SideTracker()
         tracker.state = FALLING
-        transition(tracker, BELOW_HIP_NORM_Y)
+        tracker.transition(BELOW_HIP_NORM_Y)
         assert tracker.state == BOTTOM
         assert tracker.rep_count == 0
 
@@ -289,12 +299,16 @@ class TestTransitionStateMachine:
 class TestLockout:
     """Post-rep lockout prevents backswing from starting a new cycle."""
 
-    def test_lockout_set_after_rep(self):
-        """Completing a rep at TOP→FALLING sets lockout to MIN_REP_LOCKOUT."""
+    def test_lockout_set_when_wrist_reaches_bottom_after_rep(self):
+        """Lockout is applied at FALLING→BOTTOM so the full cooldown is available."""
         tracker = SideTracker()
         tracker.state = TOP
-        tracker.top_frames = MIN_TOP_FRAMES
-        transition(tracker, MID_NORM_Y)   # confirmed descent from overhead
+        tracker.top_frames = MIN_TOP_FRAMES - 1
+        tracker.transition(OVERHEAD_NORM_Y)   # fixation confirmed → rep counted
+        assert tracker.rep_count == 1
+        tracker.transition(MID_NORM_Y)        # TOP → FALLING
+        assert tracker.lockout == 0           # lockout not yet applied
+        tracker.transition(BELOW_HIP_NORM_Y)  # FALLING → BOTTOM → lockout set
         assert tracker.lockout == MIN_REP_LOCKOUT
 
     def test_lockout_blocks_rising_from_bottom(self):
@@ -302,14 +316,14 @@ class TestLockout:
         tracker = SideTracker()
         tracker.needs_init = False
         tracker.lockout = 5
-        transition(tracker, OVERHEAD_NORM_Y)   # would normally trigger RISING
+        tracker.transition(OVERHEAD_NORM_Y)   # would normally trigger RISING
         assert tracker.state == BOTTOM
 
     def test_lockout_decrements_each_frame(self):
         """Lockout counter decrements by one each frame."""
         tracker = SideTracker()
         tracker.lockout = 3
-        transition(tracker, BELOW_HIP_NORM_Y)
+        tracker.transition(BELOW_HIP_NORM_Y)
         assert tracker.lockout == 2
 
     def test_lockout_allows_rising_when_zero(self):
@@ -318,7 +332,7 @@ class TestLockout:
         tracker = SideTracker()
         tracker.needs_init = False
         tracker.lockout = 1
-        transition(tracker, OVERHEAD_NORM_Y)
+        tracker.transition(OVERHEAD_NORM_Y)
         assert tracker.state == RISING
 
 
@@ -425,9 +439,9 @@ class TestUpdateTracker:
         )
 
     def _call(self, tracker, wrist_y_norm, **kwargs):
-        """Call update_tracker with a synthetic landmark list."""
-        update_tracker(
-            tracker, self._landmarks_with_wrist_at(wrist_y_norm),
+        """Call tracker.update with a synthetic landmark list."""
+        tracker.update(
+            self._landmarks_with_wrist_at(wrist_y_norm),
             self.WRIST_IDX, self.SHOULDER_IDX, self.HIP_IDX, self.ELBOW_IDX,
             self.FRAME_W, self.FRAME_H, **kwargs,
         )
@@ -490,24 +504,24 @@ class TestNeedsInit:
 
     def test_overhead_at_start_does_not_trigger_rising(self):
         tracker = SideTracker()
-        transition(tracker, OVERHEAD_NORM_Y)
+        tracker.transition(OVERHEAD_NORM_Y)
         assert tracker.state == BOTTOM
 
     def test_initialises_on_first_below_hip_frame(self):
         tracker = SideTracker()
-        transition(tracker, BELOW_HIP_NORM_Y)
+        tracker.transition(BELOW_HIP_NORM_Y)
         assert tracker.needs_init == False
 
     def test_overhead_after_init_triggers_rising(self):
         tracker = SideTracker()
-        transition(tracker, BELOW_HIP_NORM_Y)   # clears needs_init
-        transition(tracker, OVERHEAD_NORM_Y)
+        tracker.transition(BELOW_HIP_NORM_Y)   # clears needs_init
+        tracker.transition(OVERHEAD_NORM_Y)
         assert tracker.state == RISING
 
     def test_mid_position_at_start_does_not_init(self):
         # norm_y between thresholds is not a confirmed bottom
         tracker = SideTracker()
-        transition(tracker, MID_NORM_Y)
+        tracker.transition(MID_NORM_Y)
         assert tracker.needs_init is True
         assert tracker.state == BOTTOM
 
@@ -521,7 +535,7 @@ class TestDoubleMode:
         left_tracker  = SideTracker()
 
         for norm_y in ONE_REP:
-            transition(right_tracker, norm_y)
+            right_tracker.transition(norm_y)
 
         assert right_tracker.rep_count == 1
         assert left_tracker.rep_count  == 0
@@ -534,10 +548,10 @@ class TestDoubleMode:
         one_rep_with_drain = ONE_REP + LOCKOUT_DRAIN
 
         for norm_y in (one_rep_with_drain * 2 + ONE_REP):
-            transition(right_tracker, norm_y)
+            right_tracker.transition(norm_y)
 
         for norm_y in (one_rep_with_drain * 4 + ONE_REP):
-            transition(left_tracker, norm_y)
+            left_tracker.transition(norm_y)
 
         assert right_tracker.rep_count == 3
         assert left_tracker.rep_count  == 5
@@ -658,14 +672,14 @@ class TestSideTrackerWithCustomThresholds:
         # (with default 0.4 it would NOT fire since 0.5 > 0.4)
         tracker = SideTracker(rise_threshold=0.6, drop_threshold=0.85)
         tracker.needs_init = False
-        transition(tracker, 0.5)
+        tracker.transition(0.5)
         assert tracker.state == RISING
 
     def test_default_rise_threshold_does_not_fire_at_0_5(self):
         # Default rise_threshold=0.4: norm_y=0.5 > 0.4, so no transition
         tracker = SideTracker()
         tracker.needs_init = False
-        transition(tracker, 0.5)
+        tracker.transition(0.5)
         assert tracker.state == BOTTOM
 
     def test_default_tracker_uses_module_constants(self):
@@ -707,10 +721,11 @@ def simulate_switch(norm_y_sequence, min_top_frames=2):
         elif (active_t.state == BOTTOM
                 and active_t.norm_y > active_t.drop_threshold
                 and inactive_t.norm_y < active_t.rise_threshold):
-            inactive_t.needs_init = False
-            inactive_t.state      = TOP
-            inactive_t.top_frames = inactive_t.min_top_frames  # pre-filled
-            inactive_t.lockout    = 0
+            inactive_t.needs_init          = False
+            inactive_t.state               = TOP
+            inactive_t.top_frames          = inactive_t.min_top_frames  # pre-filled
+            inactive_t.lockout             = 0
+            inactive_t._counted_this_cycle = False
             active_t.state        = BOTTOM
             active_t.top_frames   = 0
             switch_side    = 'left' if switch_side == 'right' else 'right'
@@ -720,7 +735,7 @@ def simulate_switch(norm_y_sequence, min_top_frames=2):
             else:
                 active_t, active_ny = left_t, left_ny
 
-        transition(active_t, active_ny)
+        active_t.transition(active_ny)
 
     return right_t.rep_count, left_t.rep_count, switch_side
 
@@ -771,13 +786,13 @@ class TestSwitchMode:
         r, l, side = simulate_switch(frames)
         assert r == 3 and l == 0 and side == 'right'
 
-    def test_switch_moment_itself_does_not_count(self):
-        """The switch fires at the transition frame only — it alone must not count."""
+    def test_overhead_confirmed_at_switch_counts_immediately(self):
+        """When the KB is overhead in the new hand the rep is counted on that frame."""
         switch_trigger = [(_HIP, _OVERHEAD)]  # active at hip, inactive overhead
-        # One switch frame: the switch fires but no descent yet → l still 0
+        # The switch frame: incoming hand is confirmed overhead → rep counted at once
         frames = list(_PAUSE) + _right_rep() + switch_trigger
         r, l, _ = simulate_switch(frames)
-        assert l == 0, f"Switch frame alone produced a left rep: l={l}"
+        assert l == 1, f"Switch frame with KB overhead should count a rep, got l={l}"
         assert r == 1
 
     def test_first_descent_after_switch_counts_as_rep(self):
