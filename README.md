@@ -132,6 +132,8 @@ Anti-double-count guards:
 | `--knee-lock` | Knee angle ≥ 160° | BOTTOM→RISING is blocked until knees are straight (rep start requires locked legs) |
 | `--ankle-grounded` | Heel Y stays within 3% of frame height above its BOTTOM baseline | Displays a red **HEEL RAISED!** warning in the HUD; rep still counted |
 
+**Ankle-grounded detail:** When `--ankle-grounded` is active, the ankle (heel) pixel Y position is recorded each time the wrist enters BOTTOM state — this becomes the baseline for that rep. During the RISING → TOP → FALLING phases the ankle Y is checked every frame. If it rises more than `3% of the frame height` above the baseline, a red **HEEL RAISED!** warning appears in the HUD. The warning is informational only (the rep still counts) — it is designed for push press sets where heel drive is not allowed.
+
 Elbow angle (shoulder→elbow→wrist) and knee angle (hip→knee→ankle) are always computed and shown in the HUD as green/red status dots regardless of whether the gates are active.
 
 ### Switch Mode (Hand-to-Hand)
