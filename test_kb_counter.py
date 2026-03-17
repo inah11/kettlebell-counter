@@ -190,13 +190,13 @@ class TestTransitionEdges:
         assert tracker.state == FALLING
         assert tracker.rep_count == 0
 
-    def test_falling_just_above_threshold_counts(self):
-        """norm_y just above DROP_THRESHOLD completes a rep."""
+    def test_falling_just_above_threshold_resets_to_bottom(self):
+        """norm_y just above DROP_THRESHOLD moves FALLING → BOTTOM (rep already counted at top)."""
         tracker = SideTracker()
         tracker.state = FALLING
         transition(tracker, DROP_THRESHOLD + 0.001)
         assert tracker.state == BOTTOM
-        assert tracker.rep_count == 1
+        assert tracker.rep_count == 0  # rep was counted at TOP→FALLING, not here
 
 
 class TestTransitionStateMachine:
@@ -266,13 +266,22 @@ class TestTransitionStateMachine:
         assert tracker.state == FALLING
         assert tracker.rep_count == 0
 
-    def test_falling_to_bottom_increments_rep(self):
-        """Wrist reaching below hip from FALLING completes the rep."""
+    def test_top_to_falling_counts_rep(self):
+        """Rep is counted at TOP→FALLING when overhead hold is confirmed."""
+        tracker = SideTracker()
+        tracker.state = TOP
+        tracker.top_frames = MIN_TOP_FRAMES
+        transition(tracker, MID_NORM_Y)   # wrist starts descending
+        assert tracker.state == FALLING
+        assert tracker.rep_count == 1
+
+    def test_falling_to_bottom_resets_state_without_counting(self):
+        """FALLING → BOTTOM changes state only; rep was already counted at the top."""
         tracker = SideTracker()
         tracker.state = FALLING
         transition(tracker, BELOW_HIP_NORM_Y)
         assert tracker.state == BOTTOM
-        assert tracker.rep_count == 1
+        assert tracker.rep_count == 0
 
 
 # ── Lockout (anti-double-count guard) ────────────────────────────────────────
@@ -281,10 +290,11 @@ class TestLockout:
     """Post-rep lockout prevents backswing from starting a new cycle."""
 
     def test_lockout_set_after_rep(self):
-        """Completing a rep sets lockout to MIN_REP_LOCKOUT."""
+        """Completing a rep at TOP→FALLING sets lockout to MIN_REP_LOCKOUT."""
         tracker = SideTracker()
-        tracker.state = FALLING
-        transition(tracker, BELOW_HIP_NORM_Y)
+        tracker.state = TOP
+        tracker.top_frames = MIN_TOP_FRAMES
+        transition(tracker, MID_NORM_Y)   # confirmed descent from overhead
         assert tracker.lockout == MIN_REP_LOCKOUT
 
     def test_lockout_blocks_rising_from_bottom(self):
@@ -337,17 +347,16 @@ class TestFullRepCycle:
         _, rep_count = drive_state_machine(norm_y_sequence)
         assert rep_count == 0
 
-    def test_no_rep_without_drop(self):
-        """Wrist staying overhead without dropping to hip results in zero reps."""
-        # Rises and stays overhead long enough, but never drops → stays FALLING
+    def test_rep_counted_before_wrist_reaches_bottom(self):
+        """Rep is counted at the top fixation before the wrist returns to hip level."""
         norm_y_sequence = (
             [BELOW_HIP_NORM_Y]
             + [OVERHEAD_NORM_Y] * (MIN_TOP_FRAMES + 2)
-            + [MID_NORM_Y] * 3   # not below DROP_THRESHOLD
+            + [MID_NORM_Y] * 3   # descending but not yet past DROP_THRESHOLD
         )
         state, rep_count = drive_state_machine(norm_y_sequence)
-        assert rep_count == 0
-        assert state == FALLING
+        assert rep_count == 1      # rep counted at the top, not at the bottom
+        assert state == FALLING    # still descending, hasn't reached hip yet
 
     def test_rep_count_accumulates(self):
         """Rep counts accumulate correctly across multiple cycles."""

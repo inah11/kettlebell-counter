@@ -251,7 +251,10 @@ def transition(tracker: SideTracker, norm_y: float, count_top_frame: bool = True
         else:
             # wrist has started descending
             if tracker.top_frames >= tracker.min_top_frames:
+                # Overhead fixation confirmed — count the rep now, at the top
                 tracker.state = FALLING
+                tracker.rep_count += 1
+                tracker.lockout = MIN_REP_LOCKOUT
             else:
                 # didn't stay overhead long enough — treat as a swing-through
                 tracker.state = BOTTOM
@@ -259,9 +262,8 @@ def transition(tracker: SideTracker, norm_y: float, count_top_frame: bool = True
 
     elif tracker.state == FALLING:
         if norm_y > tracker.drop_threshold:
+            # Wrist returned to bottom; rep was already counted at the top
             tracker.state = BOTTOM
-            tracker.rep_count += 1
-            tracker.lockout = MIN_REP_LOCKOUT
 
 
 def update_display_only(tracker: SideTracker, landmark_list,
