@@ -1,0 +1,20 @@
+[MASTER]
+# cv2 and mediapipe are C extensions; pylint cannot inspect their members.
+extension-pkg-whitelist=cv2,mediapipe
+
+[MESSAGES CONTROL]
+disable=
+    # SideTracker is an intentional data class
+    too-many-instance-attributes,
+    too-few-public-methods,
+    # transition() is a state machine by design
+    too-many-branches,
+    # Functions wrap MediaPipe coordinates which need many params
+    too-many-arguments,
+    too-many-positional-arguments,
+    too-many-locals,
+    # Test helper mirrors production code by design
+    duplicate-code
+
+[FORMAT]
+max-line-length=100

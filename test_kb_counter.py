@@ -1,15 +1,15 @@
 """
-Tests for snatch_counter.py pure-logic functions.
+Tests for kb_counter.py pure-logic functions.
 No CV or MediaPipe required — all heavy deps are avoided.
 
-Run with:  pytest test_snatch_counter.py -v
+Run with:  pytest test_kb_counter.py -v
 """
 
 from collections import deque
 
 import pytest
 
-from snatch_counter import (
+from kb_counter import (
     BOTTOM, RISING, TOP, FALLING,
     RISE_THRESHOLD, DROP_THRESHOLD, SMOOTH_WINDOW,
     MIN_TOP_FRAMES, MIN_REP_LOCKOUT,
@@ -724,7 +724,7 @@ _MID      = (RISE_THRESHOLD + DROP_THRESHOLD) / 2  # between thresholds
 _PAUSE = [(_HIP, _HIP)] * (MIN_REP_LOCKOUT + 5)   # inter-rep gap
 
 def _right_rep(n_top=2):
-    """Frames for a single right-hand snatch (left wrist resting at hip)."""
+    """Frames for a single right-hand rep (left wrist resting at hip)."""
     return (
         [(_OVERHEAD, _HIP)] +            # BOTTOM → RISING
         [(_OVERHEAD, _HIP)] +            # RISING → TOP
@@ -734,7 +734,7 @@ def _right_rep(n_top=2):
     )
 
 def _left_rep(n_top=2):
-    """Frames for a single left-hand snatch (right wrist resting at hip)."""
+    """Frames for a single left-hand rep (right wrist resting at hip)."""
     return (
         [(_HIP, _OVERHEAD)] +
         [(_HIP, _OVERHEAD)] +

@@ -1,12 +1,12 @@
 """
-Kettlebell Snatch Rep Counter
+Kettlebell Rep Counter
 Usage:
-  python snatch_counter.py <video_file>                # single KB (right hand)
-  python snatch_counter.py <video_file> --mode double  # double KB (both hands)
-  python snatch_counter.py <video_file> --mode switch  # hand-to-hand KB set
-  python snatch_counter.py <video_file> --elbow-lock   # require elbow lockout at top
-  python snatch_counter.py <video_file> --calibrate    # dedicated calibration pass
-  python snatch_counter.py <video_file> --no-auto-calib  # skip auto-calibration
+  python kb_counter.py <video_file>                # single KB (right hand)
+  python kb_counter.py <video_file> --mode double  # double KB (both hands)
+  python kb_counter.py <video_file> --mode switch  # hand-to-hand KB set
+  python kb_counter.py <video_file> --elbow-lock   # require elbow lockout at top
+  python kb_counter.py <video_file> --calibrate    # dedicated calibration pass
+  python kb_counter.py <video_file> --no-auto-calib  # skip auto-calibration
 """
 
 import json
@@ -116,7 +116,7 @@ class Calibrator:
 
 def parse_args():
     """Parse and return command-line arguments."""
-    parser = argparse.ArgumentParser(description="Kettlebell snatch rep counter")
+    parser = argparse.ArgumentParser(description="Kettlebell rep counter")
     parser.add_argument("video", help="Path to input video file")
     parser.add_argument("--mode", choices=["single", "double", "switch"], default="single",
                         help="'single' tracks right wrist only (default); "
@@ -220,7 +220,7 @@ def transition(tracker: SideTracker, norm_y: float, count_top_frame: bool = True
     count_top_frame: when False the current frame at the top is not counted toward
     min_top_frames (used by update_tracker to gate on elbow lock).
 
-    Two guards against double-counting (common in half-snatch):
+    Two guards against double-counting (common in competition movements):
       - min_top_frames: wrist must stay overhead for several frames before TOP is
         confirmed, preventing a swing-through from counting.
       - lockout: after each rep is counted, a cooldown blocks BOTTOM→RISING so
@@ -756,7 +756,7 @@ def main():
                 switch_lockout,
             ])
 
-        cv2.imshow("Kettlebell Snatch Counter", frame)
+        cv2.imshow("Kettlebell Rep Counter", frame)
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
             if dedicated_calib and calibrator is not None and not calibrator.done:

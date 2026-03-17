@@ -2,7 +2,7 @@
 
 A computer-vision rep counter for kettlebell exercises using [MediaPipe Pose](https://google.github.io/mediapipe/solutions/pose.html) and OpenCV. Tracks wrist position relative to the body and counts reps through a state-machine — no wearable required.
 
-Supports **single-hand snatch/jerk**, **double kettlebell**, and **hand-to-hand switch sets**.
+Supports **single-hand**, **double kettlebell**, and **hand-to-hand switch sets** for competition movements including snatch, jerk, and press.
 
 ---
 
@@ -11,7 +11,7 @@ Supports **single-hand snatch/jerk**, **double kettlebell**, and **hand-to-hand 
 - Counts reps in real time from a video file
 - Three tracking modes: single wrist, both wrists independently, hand-to-hand pass
 - Automatic calibration to your range of motion (or load saved calibration)
-- Tunable thresholds for different movements (snatch vs. jerk vs. press)
+- Tunable thresholds for different movements (snatch, jerk, long cycle, press)
 - Elbow-lockout detection (optional gate for rep validity)
 - Per-frame CSV logging for debugging
 - HUD overlay: state, rep count, norm_y, elbow angle, active hand indicator
@@ -40,13 +40,13 @@ pip install mediapipe opencv-python
 
 ```bash
 # Single kettlebell, right hand (default)
-python snatch_counter.py video.mp4
+python kb_counter.py video.mp4
 
 # Double kettlebell (both hands, independent counts)
-python snatch_counter.py video.mp4 --mode double
+python kb_counter.py video.mp4 --mode double
 
 # Hand-to-hand switch set (combined count, active hand indicator)
-python snatch_counter.py video.mp4 --mode switch
+python kb_counter.py video.mp4 --mode switch
 ```
 
 Press **q** to quit. Final rep count is printed to the terminal.
@@ -64,7 +64,7 @@ Press **q** to quit. Final rep count is printed to the terminal.
 | `--elbow-lock` | off | Require elbow lockout (≥ 160°) at the top for top_frames to accumulate |
 | `--mirror` | off | Flip video horizontally (for selfie/front-facing camera footage) |
 | `--log FILE` | — | Write per-frame CSV debug log to FILE |
-| `--calibrate` | — | Dedicated calibration pass: swing KB for ~5 s, saves `calibration.json` |
+| `--calibrate` | — | Dedicated calibration pass: move KB through full range for ~5 s, saves `calibration.json` |
 | `--no-auto-calib` | — | Skip the auto-calibration window; load `calibration.json` if present |
 
 ---
@@ -118,11 +118,11 @@ A **switch_lockout** of 30 frames (~1 s) prevents ping-pong re-switching.
 
 ## Tuning for Different Movements
 
-### Snatch (default)
+### Snatch / Long Cycle
 The KB swings from below the hip to overhead.
 
 ```bash
-python snatch_counter.py video.mp4 --mode switch
+python kb_counter.py video.mp4 --mode switch
 ```
 
 Defaults (`rise=0.4`, `drop=0.85`) work well.
@@ -131,34 +131,34 @@ Defaults (`rise=0.4`, `drop=0.85`) work well.
 The KB stays between rack (~shoulder) and overhead. It never reaches hip level, so the default `drop=0.85` is never triggered.
 
 ```bash
-python snatch_counter.py video.mp4 --mode switch \
+python kb_counter.py video.mp4 --mode switch \
   --rise-threshold -0.3 \
   --drop-threshold 0.05 \
   --min-top-time 0.3
 ```
 
-| Threshold | Jerk value | Why |
-|-----------|-----------|-----|
+| Threshold | Value | Why |
+|-----------|-------|-----|
 | `--rise-threshold -0.3` | wrist must be well above shoulder | rack position (≈ 0.07) is above −0.3, so it never falsely triggers RISING |
 | `--drop-threshold 0.05` | rack position triggers BOTTOM | rack is norm_y ≈ 0.04–0.12, safely above 0.05 |
-| `--min-top-time 0.3` | shorter lockout at top | jerk fixation can be brief |
+| `--min-top-time 0.3` | shorter lockout at top | fixation can be brief |
 
 ### Calibration
 
 Run a dedicated calibration pass to derive thresholds from your actual range of motion:
 
 ```bash
-python snatch_counter.py video.mp4 --calibrate
+python kb_counter.py video.mp4 --calibrate
 ```
 
-Swing the KB through the full range for ~5 seconds. Thresholds are saved to `calibration.json` and loaded automatically on subsequent runs. Override any saved value with `--rise-threshold` / `--drop-threshold`.
+Move the KB through the full range for ~5 seconds. Thresholds are saved to `calibration.json` and loaded automatically on subsequent runs. Override any saved value with `--rise-threshold` / `--drop-threshold`.
 
 ---
 
 ## Debugging with CSV Logs
 
 ```bash
-python snatch_counter.py video.mp4 --mode switch --log debug.csv \
+python kb_counter.py video.mp4 --mode switch --log debug.csv \
   --rise-threshold -0.3 --drop-threshold 0.05 --min-top-time 0.3
 ```
 
@@ -184,7 +184,7 @@ The CSV contains one row per frame:
 
 ```bash
 source venv/bin/activate
-pytest test_snatch_counter.py -v
+pytest test_kb_counter.py -v
 ```
 
 76 tests covering: smoothing, normalisation, state-machine transitions, lockout guards, calibration, switch-mode detection, and multi-switch N×M rep patterns. No camera or MediaPipe required to run tests.
@@ -194,9 +194,9 @@ pytest test_snatch_counter.py -v
 ## Project Structure
 
 ```
-snatch_counter.py        # All logic: state machine, calibration, HUD, main loop
-test_snatch_counter.py   # 76 unit tests (pure Python, no CV/MediaPipe)
-calibration.json         # Auto-generated after --calibrate (gitignored)
+kb_counter.py        # All logic: state machine, calibration, HUD, main loop
+test_kb_counter.py   # 76 unit tests (pure Python, no CV/MediaPipe)
+calibration.json     # Auto-generated after --calibrate (gitignored)
 ```
 
 ---
